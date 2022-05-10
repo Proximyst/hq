@@ -4,6 +4,7 @@
 #![deny(nonstandard_style)]
 #![deny(clippy::all)]
 
+mod lua;
 pub mod prelude {
     pub use tracing::{debug, error, info, trace, warn};
 }
@@ -11,8 +12,6 @@ pub mod prelude {
 use self::prelude::*;
 use color_eyre::Report;
 use mlua::prelude::*;
-use serde::Serialize;
-use std::collections::HashSet;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 #[tokio::main]
@@ -26,7 +25,7 @@ async fn main() -> Result<(), Report> {
 
     let lua = Lua::new();
     // Lua setup
-    lua.globals().set("enum", lua.create_function(lua_enum)?)?;
+    lua.globals().set("enum", lua.create_function(self::lua::enumeration::lua_enum)?)?;
 
     // We want a new print function, because we want it to use tracing::info!.
     lua.globals()
@@ -46,51 +45,7 @@ async fn main() -> Result<(), Report> {
     Ok(())
 }
 
-#[allow(unused_macros)]
-macro_rules! lua_enum {
-    {
-        $(#[$typmeta:meta])*
-        $vis:vis enum $typename:ident {
-            $(
-                $(#[$variantmeta:meta])*
-                $variantname:ident = $luaname:literal
-            ),*
-            $(,)*
-        }
-    } => {
-        $(#[$typmeta])*
-        $vis enum $typename {
-            $(
-                $(#[$variantmeta])*
-                $variantname
-            ),*
-        }
-
-        impl<'l> mlua::ToLua<'l> for $typename {
-            fn to_lua(self, lua: &'l Lua) -> mlua::Result<mlua::Value<'l>> {
-                match self {
-                    $(
-                        Self::$variantname => Ok(mlua::Value::String(lua.create_string($luaname)?))
-                    ),*
-                }
-            }
-        }
-
-        #[allow(deadcode)]
-        impl $typename {
-            pub fn lua_definition() -> LuaEnum {
-                let mut set = HashSet::with_capacity(
-                    0
-                    $(+ if $luaname == $luaname { 1 } else { 1 })*
-                );
-                $(set.insert(String::from($luaname));)*
-                LuaEnum(set)
-            }
-        }
-    };
-}
-
-fn tracing_info_print(_: &Lua, args: mlua::MultiValue<'_>) -> mlua::Result<()> {
+pub fn tracing_info_print(_: &Lua, args: mlua::MultiValue<'_>) -> mlua::Result<()> {
     // If the args are empty, nothing is allocated in practice. So let's be wasteful.
     let mut message = String::new();
     for arg in args {
@@ -105,46 +60,4 @@ fn tracing_info_print(_: &Lua, args: mlua::MultiValue<'_>) -> mlua::Result<()> {
     }
     info!("lua: {}", message);
     Ok(())
-}
-
-fn lua_enum<'l>(l: &'l Lua, args: mlua::MultiValue<'l>) -> mlua::Result<mlua::Value<'l>> {
-    if args.len() != 1 {
-        return Err("expected 1 argument, which should be a set").to_lua_err();
-    }
-    let set = match args.into_iter().next() {
-        Some(mlua::Value::Table(t)) => t,
-        Some(otherwise) => {
-            return Err(format!("argument must be a set; found: {:?}", otherwise)).to_lua_err()
-        }
-        None => return Err("expected 1 argument").to_lua_err(),
-    };
-
-    let mut names = HashSet::new();
-    for value in set.sequence_values::<String>() {
-        names.insert(value?);
-    }
-
-    Ok(mlua::Value::UserData(
-        l.create_ser_userdata(LuaEnum(names))?,
-    ))
-}
-
-#[derive(Serialize, Debug)]
-pub struct LuaEnum(HashSet<String>);
-
-impl mlua::UserData for LuaEnum {
-    fn add_methods<'lua, M: LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_meta_method("__index", |_, this, args: mlua::MultiValue<'_>| {
-            let name = match args.into_iter().next() {
-                Some(mlua::Value::String(name)) => name,
-                _ => return Err("invalid args: must be exactly 1 string argument").to_lua_err(),
-            };
-
-            if this.0.contains(name.to_str()?) {
-                return Ok(mlua::Value::String(name));
-            }
-
-            Err(format!("invalid enum value: {}", name.to_str()?)).to_lua_err()
-        });
-    }
 }
