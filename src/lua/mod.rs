@@ -89,13 +89,3 @@ fn tracing_info_print(_: &Lua, args: MultiValue<'_>) -> LuaResult<()> {
     info!("lua: {}", message);
     Ok(())
 }
-
-async fn read_file_if_exists<P: AsRef<std::path::Path>>(
-    path: P,
-) -> Result<Option<String>, io::Error> {
-    match fs::read_to_string(path).await {
-        Ok(s) => Ok(Some(s)),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e),
-    }
-}
