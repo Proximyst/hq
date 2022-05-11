@@ -33,7 +33,7 @@ async fn main() -> Result<(), Report> {
         .try_init()
         .wrap_err("error while setting up tracing")?;
 
-    let args = <Args as Parser>::try_parse().wrap_err("could not read command arguments")?;
+    let args = <Args as Parser>::parse();
 
     let _lua = self::lua::setup_lua(&args.sources)
         .await
