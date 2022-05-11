@@ -10,26 +10,20 @@ pub mod prelude {
 }
 
 use self::prelude::*;
-use color_eyre::Report;
-use mlua::prelude::*;
+use color_eyre::{eyre::WrapErr as _, Report};
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 #[tokio::main]
 async fn main() -> Result<(), Report> {
-    color_eyre::install()?;
+    color_eyre::install().wrap_err("error while setting up eyre")?;
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .with(EnvFilter::from_default_env())
-        .try_init()?;
+        .try_init()
+        .wrap_err("error while setting up tracing")?;
 
-    let lua = Lua::new();
-    // Lua setup
-    lua.globals().set("enum", lua.create_function(self::lua::enumeration::lua_enum)?)?;
-
-    // We want a new print function, because we want it to use tracing::info!.
-    lua.globals()
-        .set("print", lua.create_function(tracing_info_print)?)?;
+    let lua = self::lua::setup_lua().wrap_err("error while setting up Lua")?;
 
     lua.load(
         r#"
@@ -40,24 +34,8 @@ async fn main() -> Result<(), Report> {
         "#,
     )
     .exec_async()
-    .await?;
+    .await
+    .wrap_err("error while running Lua test code")?;
 
-    Ok(())
-}
-
-pub fn tracing_info_print(_: &Lua, args: mlua::MultiValue<'_>) -> mlua::Result<()> {
-    // If the args are empty, nothing is allocated in practice. So let's be wasteful.
-    let mut message = String::new();
-    for arg in args {
-        if !message.is_empty() {
-            message.push('\t');
-        }
-        let formatted = match &arg {
-            mlua::Value::Function(f) => format!("{:?}", f),
-            otherwise => ron::to_string(otherwise).to_lua_err()?,
-        };
-        message.push_str(&formatted);
-    }
-    info!("lua: {}", message);
     Ok(())
 }
