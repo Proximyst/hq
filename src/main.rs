@@ -10,8 +10,18 @@ pub mod prelude {
 }
 
 use self::prelude::*;
+use clap::Parser;
 use color_eyre::{eyre::WrapErr as _, Report};
+use std::path::PathBuf;
 use tracing_subscriber::{prelude::*, EnvFilter};
+
+#[derive(Parser, Debug)]
+#[clap(author, version, about)]
+struct Args {
+    /// The directory to find requests and scripts.
+    #[clap(short, long, default_value = "./http")]
+    sources: PathBuf,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Report> {
@@ -23,19 +33,11 @@ async fn main() -> Result<(), Report> {
         .try_init()
         .wrap_err("error while setting up tracing")?;
 
-    let lua = self::lua::setup_lua().wrap_err("error while setting up Lua")?;
+    let args = <Args as Parser>::try_parse().wrap_err("could not read command arguments")?;
 
-    lua.load(
-        r#"
-            local testing = enum { "A" }
-            assert(testing.A)
-            print(testing.A)
-            print(testing.B)
-        "#,
-    )
-    .exec_async()
-    .await
-    .wrap_err("error while running Lua test code")?;
+    let _lua = self::lua::setup_lua(&args.sources)
+        .await
+        .wrap_err("error while setting up Lua")?;
 
     Ok(())
 }
